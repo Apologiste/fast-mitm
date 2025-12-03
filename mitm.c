@@ -7,6 +7,8 @@
 #include <getopt.h>
 #include <err.h>
 #include <assert.h>
+#include <omp.h>
+#include <mpi.h>
 
 typedef uint64_t u64;       /* portable 64-bit integer */
 typedef uint32_t u32;       /* portable 32-bit integer */
@@ -229,6 +231,7 @@ int golden_claw_search(int maxres, u64 k1[], u64 k2[])
     int nres = 0;
     u64 ncandidates = 0;
     u64 x[256];
+
     for (u64 z = 0; z < N; z++) {
         u64 y = g(z);
         int nx = dict_probe(y, 256, x);
