@@ -220,6 +220,8 @@ int golden_claw_search(int maxres, u64 k1[], u64 k2[])
 {
     double start = wtime();
     u64 N = 1ull << n;
+
+    //TODO: parallelize this
     for (u64 x = 0; x < N; x++) {
         u64 z = f(x);
         dict_insert(z, x);
@@ -232,11 +234,14 @@ int golden_claw_search(int maxres, u64 k1[], u64 k2[])
     u64 ncandidates = 0;
     u64 x[256];
 
+    //TODO: parallelize this
     for (u64 z = 0; z < N; z++) {
         u64 y = g(z);
         int nx = dict_probe(y, 256, x);
         assert(nx >= 0);
         ncandidates += nx;
+        
+        //TODO: parallelize this
         for (int i = 0; i < nx; i++)
             if (is_good_pair(x[i], z)) {
             	if (nres == maxres)
