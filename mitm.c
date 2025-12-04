@@ -10,6 +10,8 @@
 #include <omp.h>
 #include <mpi.h>
 
+int rank, size;
+
 typedef uint64_t u64;       /* portable 64-bit integer */
 typedef uint32_t u32;       /* portable 32-bit integer */
 struct __attribute__ ((packed)) entry { u32 k; u64 v; };  /* hash table entry */
@@ -218,42 +220,65 @@ bool is_good_pair(u64 k1, u64 k2)
 /* search the "golden collision" */
 int golden_claw_search(int maxres, u64 k1[], u64 k2[])
 {
-    double start = wtime();
+    double t_start = wtime();
     u64 N = 1ull << n;
 
-    //TODO: parallelize this
-    for (u64 x = 0; x < N; x++) {
+    //----------------------------------
+    // chunks par processus
+    u64 x_chunk = (N + size - 1) / size;
+    u64 x_start = rank * x_chunk;
+    u64 x_end = (rank + 1) * x_chunk;
+    if (x_end > N) x_end = N;
+    //----------------------------------
+
+    for (u64 x = x_start; x < x_end; x++) {
         u64 z = f(x);
         dict_insert(z, x);
     }
 
     double mid = wtime();
-    printf("Fill: %.1fs\n", mid - start);
+    //printf("Fill: %.1fs\n", mid - t_start);
     
     int nres = 0;
     u64 ncandidates = 0;
     u64 x[256];
 
-    //TODO: parallelize this
-    for (u64 z = 0; z < N; z++) {
+    //----------------------------------
+    // chunks par processus
+    u64 z_chunk = (N + size - 1) / size;
+    u64 z_start = rank * z_chunk;
+    u64 z_end = (rank + 1) * z_chunk;
+    if (z_end > N) z_end = N;
+    //----------------------------------
+    //variables locales pour chaque processus
+    int nres_local = 0;
+    u64 x_local[256]; 
+    u64 k1_local[16];           
+    u64 k2_local[16];
+    u64 ncandidates_local = 0;
+    //----------------------------------
+
+    for (u64 z = z_start; z < z_end; z++) {
         u64 y = g(z);
-        int nx = dict_probe(y, 256, x);
+        int nx = dict_probe(y, 256, x_local);
         assert(nx >= 0);
-        ncandidates += nx;
+        ncandidates_local += nx;
         
-        //TODO: parallelize this
         for (int i = 0; i < nx; i++)
-            if (is_good_pair(x[i], z)) {
-            	if (nres == maxres)
-            		return -1;
-            	k1[nres] = x[i];
-            	k2[nres] = z;
-            	printf("SOLUTION FOUND!\n");
-            	nres += 1;
+            if (is_good_pair(x_local[i], z)) {
+            	if (nres_local < maxres) {
+    
+                    k1[nres_local] = x_local[i];
+                    k2[nres_local] = z;
+                    //printf("[rank %d] SOLUTION FOUND!\n", rank);
+                    nres_local += 1;
+                }
             }
     }
-    printf("Probe: %.1fs. %" PRId64 " candidate pairs tested\n", wtime() - mid, ncandidates);
-    return nres;
+    //printf("Probe: %.1fs. %" PRId64 " candidate pairs tested\n", wtime() - mid, ncandidates);
+
+    //TODO : rassembler les resultats de tous les processus
+    return nres; 
 }
 
 /************************** command-line options ****************************/
@@ -311,7 +336,13 @@ void process_command_line_options(int argc, char ** argv)
 /******************************************************************************/
 
 int main(int argc, char **argv)
-{
+{   
+    // Initialize MPI
+    MPI_Init(&argc, &argv);
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &size);
+
+
 	process_command_line_options(argc, argv);
     printf("Running with n=%d, C0=(%08x, %08x) and C1=(%08x, %08x)\n", 
         (int) n, C[0][0], C[0][1], C[1][0], C[1][1]);
