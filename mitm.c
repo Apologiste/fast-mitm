@@ -235,6 +235,7 @@ int golden_claw_search(int maxres, u64 k1[], u64 k2[])
         u64 z = f(x);
         dict_insert(z, x);
     }
+    MPI_Allgather(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, A, sizeof(*A) * dict_size / size, MPI_BYTE, MPI_COMM_WORLD);
 
     double mid = wtime();
     //printf("Fill: %.1fs\n", mid - t_start);
@@ -243,38 +244,65 @@ int golden_claw_search(int maxres, u64 k1[], u64 k2[])
     u64 ncandidates = 0;
     u64 x[256];
 
-    //----------------------------------
-    // chunks par processus
-    u64 z_chunk = (N + size - 1) / size;
-    u64 z_start = rank * z_chunk;
-    u64 z_end = (rank + 1) * z_chunk;
-    if (z_end > N) z_end = N;
-    //----------------------------------
-    //variables locales pour chaque processus
-    int nres_local = 0;
-    u64 x_local[256]; 
-    u64 k1_local[16];           
-    u64 k2_local[16];
-    u64 ncandidates_local = 0;
+    
     //----------------------------------
 
-    for (u64 z = z_start; z < z_end; z++) {
-        u64 y = g(z);
-        int nx = dict_probe(y, 256, x_local);
-        assert(nx >= 0);
-        ncandidates_local += nx;
-        
-        for (int i = 0; i < nx; i++)
-            if (is_good_pair(x_local[i], z)) {
-            	if (nres_local < maxres) {
-    
-                    k1[nres_local] = x_local[i];
-                    k2[nres_local] = z;
-                    //printf("[rank %d] SOLUTION FOUND!\n", rank);
-                    nres_local += 1;
+    uint64_t stop_flag = 0;
+    uint64_t READY = 1;
+    uint64_t WORK = 2;
+    MPI_Status status;
+
+    if(rank == 0){
+        // Boss
+
+        for(u64 z = 0; z < N ; z++){
+            // Attendre qu'un worker est libre
+            MPI_Recv(NULL, 0, MPI_INT, MPI_ANY_SOURCE, READY, MPI_COMM_WORLD, &status);
+
+            // rank du worker
+            int worker = status.MPI_SOURCE;
+
+            MPI_Send(&z, 1, MPI_UINT64_T, worker, WORK, MPI_COMM_WORLD);
+        }
+        stop_flag = 1; // indiquer aux workers d'arreter
+        MPI_Bcast(&stop_flag, 1, MPI_UINT64_T, 0, MPI_COMM_WORLD); // signaler la fin aux workers
+
+    } else {
+        // Worker
+
+        while(true){
+
+            if (stop_flag == 1) {
+                break;
+            }
+
+            MPI_Send(NULL, 0, MPI_INT, 0, READY, MPI_COMM_WORLD); // signaler au boss qu'on est pret
+
+            u64 z;
+            MPI_Status status;
+
+            // attendre une tâche du boss
+            MPI_Recv(&z, 1, MPI_UINT64_T, 0, WORK, MPI_COMM_WORLD, &status);
+
+            u64 y = g(z);
+            int nx = dict_probe(y, 256, x);
+            assert(nx >= 0);
+            ncandidates += nx;
+
+            for (int i = 0; i < nx; i++){
+                if (is_good_pair(x[i], z)) {
+                    if (nres < maxres) {
+                        k1[nres] = x[i];
+                        k2[nres] = z;
+                        //printf("[rank %d] SOLUTION FOUND!\n", rank);
+                        nres += 1;
+                    }
                 }
             }
+
+        }
     }
+
     //printf("Probe: %.1fs. %" PRId64 " candidate pairs tested\n", wtime() - mid, ncandidates);
 
     //TODO : rassembler les resultats de tous les processus
