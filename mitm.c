@@ -247,42 +247,41 @@ int golden_claw_search(int maxres, u64 k1[], u64 k2[])
     
     //----------------------------------
 
-    uint64_t stop_flag = 0;
-    uint64_t READY = 1;
-    uint64_t WORK = 2;
+    int STOP = 0;
+    #define READY 1
+    #define WORK 2
+    
+
     MPI_Status status;
 
     if(rank == 0){
         // Boss
-
         for(u64 z = 0; z < N ; z++){
             // Attendre qu'un worker est libre
             MPI_Recv(NULL, 0, MPI_INT, MPI_ANY_SOURCE, READY, MPI_COMM_WORLD, &status);
 
             // rank du worker
             int worker = status.MPI_SOURCE;
-
             MPI_Send(&z, 1, MPI_UINT64_T, worker, WORK, MPI_COMM_WORLD);
         }
-        stop_flag = 1; // indiquer aux workers d'arreter
-        MPI_Bcast(&stop_flag, 1, MPI_UINT64_T, 0, MPI_COMM_WORLD); // signaler la fin aux workers
+        STOP = 1;
+        MPI_Bcast(&STOP, 1, MPI_INT, 0, MPI_COMM_WORLD); // signaler aux workers d'arreter
 
     } else {
         // Worker
-
         while(true){
-
-            if (stop_flag == 1) {
-                break;
-            }
-
+            
             MPI_Send(NULL, 0, MPI_INT, 0, READY, MPI_COMM_WORLD); // signaler au boss qu'on est pret
-
             u64 z;
             MPI_Status status;
 
+            // verifier si on doit arreter
+            MPI_Bcast(&STOP, 1, MPI_INT, 0, MPI_COMM_WORLD);
+            if(STOP) break;
+
             // attendre une tâche du boss
             MPI_Recv(&z, 1, MPI_UINT64_T, 0, WORK, MPI_COMM_WORLD, &status);
+
 
             u64 y = g(z);
             int nx = dict_probe(y, 256, x);
@@ -380,6 +379,7 @@ int main(int argc, char **argv)
 	/* search */
 	u64 k1[16], k2[16];
 	int nkey = golden_claw_search(16, k1, k2);
+    MPI_Finalize();
 	assert(nkey > 0);
 
 	/* validation */
