@@ -223,19 +223,10 @@ int golden_claw_search(int maxres, u64 k1[], u64 k2[])
     double t_start = wtime();
     u64 N = 1ull << n;
 
-    //----------------------------------
-    // chunks par processus
-    u64 x_chunk = (N + size - 1) / size;
-    u64 x_start = rank * x_chunk;
-    u64 x_end = (rank + 1) * x_chunk;
-    if (x_end > N) x_end = N;
-    //----------------------------------
-
-    for (u64 x = x_start; x < x_end; x++) {
+    for (u64 x = 0; x < N; x++) {
         u64 z = f(x);
         dict_insert(z, x);
     }
-    MPI_Allgather(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, A, sizeof(*A) * dict_size / size, MPI_BYTE, MPI_COMM_WORLD);
 
     double mid = wtime();
     //printf("Fill: %.1fs\n", mid - t_start);
@@ -247,41 +238,37 @@ int golden_claw_search(int maxres, u64 k1[], u64 k2[])
     
     //----------------------------------
 
-    int STOP = 0;
+    #define STOP 0
     #define READY 1
     #define WORK 2
     
-
     MPI_Status status;
 
-    if(rank == 0){
-        // Boss
-        for(u64 z = 0; z < N ; z++){
-            // Attendre qu'un worker est libre
+    if (rank == 0) {
+        for (u64 z = 0; z < N; z++) {
             MPI_Recv(NULL, 0, MPI_INT, MPI_ANY_SOURCE, READY, MPI_COMM_WORLD, &status);
-
-            // rank du worker
             int worker = status.MPI_SOURCE;
+
             MPI_Send(&z, 1, MPI_UINT64_T, worker, WORK, MPI_COMM_WORLD);
         }
-        STOP = 1;
-        MPI_Bcast(&STOP, 1, MPI_INT, 0, MPI_COMM_WORLD); // signaler aux workers d'arreter
 
-    } else {
+        for (int w = 1; w < size; w++) {
+            MPI_Recv(NULL, 0, MPI_INT, w, READY, MPI_COMM_WORLD, &status);
+            MPI_Send(NULL, 0, MPI_UINT64_T, w, STOP, MPI_COMM_WORLD);
+        }
+    }
+    else {
         // Worker
         while(true){
             
             MPI_Send(NULL, 0, MPI_INT, 0, READY, MPI_COMM_WORLD); // signaler au boss qu'on est pret
             u64 z;
-            MPI_Status status;
-
-            // verifier si on doit arreter
-            MPI_Bcast(&STOP, 1, MPI_INT, 0, MPI_COMM_WORLD);
-            if(STOP) break;
 
             // attendre une tâche du boss
-            MPI_Recv(&z, 1, MPI_UINT64_T, 0, WORK, MPI_COMM_WORLD, &status);
-
+            MPI_Recv(&z, 1, MPI_UINT64_T, 0, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
+            if(status.MPI_TAG == STOP){
+                break; 
+            }
 
             u64 y = g(z);
             int nx = dict_probe(y, 256, x);
@@ -368,7 +355,6 @@ int main(int argc, char **argv)
     MPI_Init(&argc, &argv);
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
-
 
 	process_command_line_options(argc, argv);
     printf("Running with n=%d, C0=(%08x, %08x) and C1=(%08x, %08x)\n", 
