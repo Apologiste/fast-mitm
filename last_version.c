@@ -145,6 +145,10 @@ void shard_dict_setup(u64 local_size) {
 
     // Chaque dictionnaire local est plus petit
     local_dict_size = (local_size / world_size) * 2;
+    if (local_dict_size == 0){
+        local_dict_size = 1; //sécurité
+    }
+
 
     local_A = malloc(local_dict_size * sizeof(struct entry));
     if (!local_A) {
@@ -637,12 +641,16 @@ int main(int argc, char **argv)
 
     // Rank 0 valide et affiche
     if (rank == 0) {
-        assert(nkey > 0);
+        if (nkey == 0) {
+            printf("Aucune solution trouvée pour n=%lu\n", n);
+            return 0;
+        }
+
 
         for (int i = 0; i < nkey; i++) {
             assert(f(k1[i]) == g(k2[i]));
             assert(is_good_pair(k1[i], k2[i]));        
-            printf("Solution found: (%" PRIx64 ", %" PRIx64 ") [checked OK]\n",
+            printf("Solution trouvée: (%" PRIx64 ", %" PRIx64 ") [checked OK]\n",
                    k1[i], k2[i]);
         }
 
