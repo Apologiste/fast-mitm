@@ -614,6 +614,8 @@ int main(int argc, char **argv)
     process_command_line_options(argc, argv);
 
     if (rank == 0) {
+        printf("Nombre de processus MPI : %d\n", world_size);
+    
         printf("Running with n=%d, C0=(%08x, %08x) and C1=(%08x, %08x)\n", 
             (int) n, C[0][0], C[0][1], C[1][0], C[1][1]);
     }
