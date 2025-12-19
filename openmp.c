@@ -305,18 +305,12 @@ int golden_claw_search(int maxres, u64 k1[], u64 k2[])
 
 
     /*******************************************************************
-     *  PHASE 1 : remplir le dictionnaire f(x) -> z
-     ******************************************************************/
+    *  PHASE 1 : remplir le dictionnaire f(x) -> z
+    ******************************************************************/
 
     int *send_counts = calloc(world_size, sizeof(int));
     int *recv_counts = calloc(world_size, sizeof(int));
     
-
-
-    // upper bound approximatif pour les requêtes
-    //MPI_Request *requests = malloc(sizeof(MPI_Request) * (N / world_size + 32));
-    //int req_idx = 0;
-
     MPI_Request *requests = malloc(world_size*sizeof(MPI_Request));
 
     // -------- boucle d'envoi (f) --------
@@ -325,7 +319,6 @@ int golden_claw_search(int maxres, u64 k1[], u64 k2[])
     {
         int tid = omp_get_thread_num();
         int nthreads = omp_get_num_threads();
-        // buffer local par thread pour éviter concurrence
         struct key_value *kv_local = malloc(world_size * 2 * (N/world_size/nthreads + 1) * sizeof(struct key_value));
         int *local_counts = calloc(world_size, sizeof(int));
 
@@ -337,69 +330,96 @@ int golden_claw_search(int maxres, u64 k1[], u64 k2[])
             if (shard_id == rank) {
                 shard_dict_insert(z, x);
             } else {
-                int idx = local_counts[shard_id]++;
+                int idx = local_counts[shard_id];
+                local_counts[shard_id]++;
                 kv_local[shard_id*(N/world_size/nthreads + 1) + idx].key = z;
                 kv_local[shard_id*(N/world_size/nthreads + 1) + idx].value = x;
             }
         }
 
-        // fusion thread-local -> global
         #pragma omp critical
-        for (int i=0; i<world_size; i++)
-            for (int j=0; j<local_counts[i]; j++)
-                kv_to_send[i][send_counts[i]++] = kv_local[i*(N/world_size/nthreads + 1) + j];
+        for (int i = 0; i < world_size; i++) {
+            for (int j = 0; j < local_counts[i]; j++) {
+                kv_to_send[i][send_counts[i]] = kv_local[i*(N/world_size/nthreads + 1) + j];
+                send_counts[i]++;
+            }
+        }
 
         free(kv_local);
         free(local_counts);
     }
 
-
-
-
-    for(int i=0 ; i<world_size ; i++){
-        MPI_Isend(kv_to_send[i], send_counts[i], MPI_KEYVALUE, i, 1, MPI_COMM_WORLD, &requests[i]);
-    }
-
-    
-
-
-    MPI_Barrier(MPI_COMM_WORLD);
-
-    // Alltoall correct = buffer send et recv distincts
+    // Chaque processus échange avec tous les autres combien de couples (key,value) il va leur envoyer
+    // send_counts[i] = nombre de couples que ce processus va envoyer au processus i
+    // recv_counts[i] = nombre de couples que ce processus va recevoir du processus i
     MPI_Alltoall(send_counts, 1, MPI_INT, recv_counts, 1, MPI_INT, MPI_COMM_WORLD);
 
+    // tableaux pour gérer les communications asynchrones
+    // send_requests : suivre les envois en cours
+    // recv_requests : suivre les réceptions en cours
+    MPI_Request *send_requests = malloc(world_size * sizeof(MPI_Request));
+    MPI_Request *recv_requests = malloc(world_size * sizeof(MPI_Request));
 
-    // -------- receptions --------
-    for(int i = 0 ; i<world_size ; i++) {
-        if(recv_counts[i]){
-            
-            struct key_value *buffer = malloc(recv_counts[i]*sizeof(struct key_value));
+    // buffer de réception par processus source
+    // recv_buffers[i] contiendra les données reçues du processus i
+    struct key_value **recv_buffers = malloc(world_size * sizeof(struct key_value *));
 
-            //MPI_Recv(buffer, recv_counts[i], MPI_KEYVALUE, i, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-            MPI_Irecv(buffer, recv_counts[i], MPI_KEYVALUE, i, 1, MPI_COMM_WORLD, &requests[i]);
-
-            for(int j = 0 ; j<recv_counts[i] ; j++){
-                shard_dict_insert(buffer[j].key, buffer[j].value);
-            }
-
-            free(buffer);
+    // chaque processus s'annonce prêt à recevoir
+    for(int i = 0; i < world_size; i++) {
+        if(recv_counts[i] > 0) {
+            recv_buffers[i] = malloc(recv_counts[i] * sizeof(struct key_value));
+            // commence une réception asynchrone du processus i
+            MPI_Irecv(recv_buffers[i], recv_counts[i], MPI_KEYVALUE, i, 1, MPI_COMM_WORLD, &recv_requests[i]);
+        } else {
+            // cas ou donnée à recevoir de ce processus
+            recv_buffers[i] = NULL;
+            recv_requests[i] = MPI_REQUEST_NULL; 
         }
     }
 
-    // attendre les envois
-    for(int i=0 ; i<world_size ; i++){
-        MPI_Wait(&requests[i], MPI_STATUSES_IGNORE);
+    // chaque processus envoie les couples aux propriétaires
+    for(int i = 0; i < world_size; i++) {
+        if(send_counts[i] > 0) {
+            // envoi asynchrone vers le processus i
+            // kv_to_send[i] : couples destinés au processus i
+            MPI_Isend(kv_to_send[i], send_counts[i], MPI_KEYVALUE, i, 1, MPI_COMM_WORLD, &send_requests[i]);
+        } else {
+            // cas ou donnée à envoyer à ce processus
+            send_requests[i] = MPI_REQUEST_NULL; 
+        }
     }
-    MPI_Barrier(MPI_COMM_WORLD);
 
+    // On attend que toutes les réceptions soient terminées avant de traiter les données
+    for(int i = 0; i < world_size; i++) {
+        if(recv_requests[i] != MPI_REQUEST_NULL) {
+            //bloque jusqu'à ce que la réception du processus i soit terminée
+            MPI_Wait(&recv_requests[i], MPI_STATUS_IGNORE);
+            
+            // insertions des données dans le dictionnaire partagé local
+            for(int j = 0; j < recv_counts[i]; j++) {
+                shard_dict_insert(recv_buffers[i][j].key, recv_buffers[i][j].value);
+            }
+            free(recv_buffers[i]);
+        }
+    }
 
+    // on attend que tous les envois soient terminés
+    for(int i = 0; i < world_size; i++) {
+        if(send_requests[i] != MPI_REQUEST_NULL) {
+            MPI_Wait(&send_requests[i], MPI_STATUS_IGNORE);
+        }
+    }
+
+    free(send_requests);
+    free(recv_requests);
+    free(recv_buffers);
     free(send_counts);
     free(recv_counts);
-    free(requests);
+
 
     /*******************************************************************
-     *  PHASE 2 : probing g(z) → y et test des collisions
-     ******************************************************************/
+     *  PHASE 2 : probing g(z) -> y et test des collisions
+    ******************************************************************/
 
     send_counts = calloc(world_size, sizeof(int));
     recv_counts = calloc(world_size, sizeof(int));
@@ -437,7 +457,8 @@ int golden_claw_search(int maxres, u64 k1[], u64 k2[])
                     }
                 }
             } else {
-                int idx = local_counts[shard_id]++;
+                int idx = local_counts[shard_id];
+                local_counts[shard_id]++;
                 kv_local[shard_id*(N/world_size/nthreads + 1) + idx].key = y;
                 kv_local[shard_id*(N/world_size/nthreads + 1) + idx].value = z;
             }
@@ -455,8 +476,6 @@ int golden_claw_search(int maxres, u64 k1[], u64 k2[])
         free(local_counts);
     }
 
-
-    
     for(int i=0 ; i<world_size ; i++){
         MPI_Isend(kv_to_send[i], send_counts[i], MPI_KEYVALUE, i, 2, MPI_COMM_WORLD, &requests[i]);
     }
@@ -495,29 +514,6 @@ int golden_claw_search(int maxres, u64 k1[], u64 k2[])
         MPI_Wait(&requests[i], MPI_STATUSES_IGNORE);
     }
 
-
-/**
-    // -------- receptions --------
-    while (work > 0 && nres_local < maxres) {
-        MPI_Recv(key_val, 2, MPI_UINT64_T, MPI_ANY_SOURCE, 2, MPI_COMM_WORLD,MPI_STATUS_IGNORE);
-
-        u64 y = key_val[0];
-        u64 z = key_val[1];
-
-        int nx = shard_probe_local(y, 256, x_local);
-
-        for (int i = 0; i < nx && nres_local < maxres; i++) {
-            if (is_good_pair(x_local[i], z)) {
-                local_k1[nres_local] = x_local[i];
-                local_k2[nres_local] = z;
-                nres_local++;
-            }
-        }
-
-        work--;
-    }
-        */
-
     MPI_Barrier(MPI_COMM_WORLD);
 
     
@@ -532,7 +528,7 @@ int golden_claw_search(int maxres, u64 k1[], u64 k2[])
 
     /*******************************************************************
      *  PHASE 3 : GATHER DES RÉSULTATS
-     ******************************************************************/
+    ******************************************************************/
 
     u64 all_nres[world_size];
     MPI_Gather(&nres_local, 1, MPI_UINT64_T,all_nres, 1, MPI_UINT64_T,0, MPI_COMM_WORLD);
