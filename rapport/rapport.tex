@@ -1,0 +1,249 @@
+\documentclass[10pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[french]{babel}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{geometry}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[french]{babel}
+\usepackage{amsmath, amssymb}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{geometry}
+\usepackage{lastpage}
+\usepackage{fancyhdr}
+\usepackage{graphicx} 
+\usepackage{float}
+
+\setlength{\headheight}{14pt} 
+\hbadness=11000  
+\vbadness=11000  
+% chktex-file 44
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyfoot[C]{\thepage/\pageref{LastPage}}
+\fancyhead[L]{Projet UE PPAR}
+\fancyhead[R]{M1 Informatique, Sorbonne Université}
+
+\geometry{margin=2.5cm}
+
+\title{\textbf{Direct Meet-in-the-Middle Attack}}
+\author{Julian Mouthon, Mario Razafinony }
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+    \begin{center}
+    Ce rapport présente la parallèlisation d'un code d'attaque \emph{Meet-in-the-Middle} (MitM) en utilisant MPI et OpenMP.\@
+    \end{center}
+\end{abstract}
+
+\thispagestyle{fancy} 
+\tableofcontents
+
+\section{Introduction}\label{sec:introduction}
+
+L'attaque \emph{Meet-in-the-Middle} est une technique qui exploite la possibilité 
+de diviser un chiffrement en deux parties indépendantes. 
+Le but est de chercher des paires de clés $(k_1, k_2)$ telles que:
+
+\[
+\text{Enc}_{k_1}(\text{Enc}_{k_2}(P_1)) = C_1 \quad \text{et} \quad \text{Enc}_{k_1}(P_0) = \text{Dec}_{k_2}(C_0)
+\]
+
+où $(P_0, C_0)$ et $(P_1, C_1)$ sont deux paires texte clair-chiffré connues.
+
+\section{Parallèlisation}\label{sec:architecture}
+
+Pour maximiser les performances, nous combinons plusieurs niveaux de parallélisme:\\
+
+\begin{itemize}
+    \item \textbf{MPI}: parallélisme multi-processus
+    \item \textbf{OpenMP}: parallélisme multi-thread
+    \item \textbf{Sharding}: distribution du dictionnaire entre processus
+    \item \textbf{Vectorisation}: TODO
+\end{itemize}
+
+\section{Phases de l'algorithme}\label{sec:phases}
+
+\subsection{Phase 1: Construction distribuée du dictionnaire}\label{subsec:phase1}
+
+\subsubsection{Objectif}
+Construire un dictionnaire distribué associant chaque image $f(x) = \text{Enc}_x(P_0)$ à sa préimage $x$.
+
+\subsubsection{Étapes détaillées}
+
+\begin{enumerate}
+    \item \textbf{Partitionnement de l'espace des clés}:
+    \begin{itemize}
+        \item Chaque processus MPI traite un sous-ensemble des clés:$\{x \mid x = \text{rank }{\text{mod (world\_size)}}\}$
+        \item Chaque thread OpenMP traite une partie de ce sous-ensemble
+    \end{itemize}
+    
+    \item \textbf{Calcul local des paires (image, préimage)}:
+    Pour chaque clé $x$ assignée:
+    \[
+    z = f(x) = \text{Enc}_x(P_0) \quad \text{où} \quad z \in \{0,1\}^n
+    \]
+    \begin{itemize}
+        \item Si $z$ appartient au shard local: insertion directe
+        \item Sinon: on le met dans buffer pour l'envoyer au processus propriétaire plus tard
+    \end{itemize}
+    
+    \item \textbf{Échange asynchrone des données}:
+    \begin{algorithmic}[1]
+        \State{}\textbf{Chaque processus:}
+        \State{}Calcule \texttt{send\_counts[i]} = nombre d'éléments pour le processus $i$
+        \State{}\texttt{MPI\_Alltoall}: échange des comptes entre tous les processus
+        \State{}\texttt{MPI\_Irecv}: poste toutes les réceptions de manière asynchrone
+        \State{}\texttt{MPI\_Isend}: envoie toutes les données de manière asynchrone
+        \State{}\texttt{MPI\_Wait}: attend que toutes les réceptions soient terminées
+        \State{}Traite les données reçues (insertion dans le dictionnaire)
+        \State{}\texttt{MPI\_Wait}: attend que tous les envois soient terminés
+    \end{algorithmic}
+    
+    \item \textbf{Insertion dans les tables de hachage locales}
+\end{enumerate}
+
+
+\subsection{Phase 2 : Recherche de collisions}
+\label{subsec:phase2}
+
+\subsubsection{Objectif}
+Trouver toutes les paires $(x, z)$ telles que:
+\[
+f(x) = g(z) \quad \text{et} \quad \text{Enc}_x(\text{Enc}_z(P_1)) = C_1
+\]
+
+\subsubsection{Étapes détaillées}
+
+\begin{enumerate}
+    \item \textbf{Calcul local des images inverses} :
+    Pour chaque $z$ assigné au processus:
+    \[
+    y = g(z) = \text{Dec}_z(C_0)
+    \]
+    \begin{itemize}
+        \item Si $y$ appartient au shard local: recherche locale dans le dictionnaire
+        \item Sinon: mise en buffer pour interrogation à distance
+    \end{itemize}
+    
+    \item \textbf{Recherche distribuée des collisions}:
+    \begin{itemize}
+        \item Interrogation du dictionnaire avec $y$ comme clé
+        \item Pour chaque $x$ trouvé: vérification de la deuxième paire $(P_1, C_1)$
+        \item Utilisation de la fonction \texttt{is\_good\_pair()} pour validation
+    \end{itemize}
+    
+    \item \textbf{Échange asynchrone des requêtes}:
+    Même schéma que la Phase 1 mais avec:
+    \begin{itemize}
+        \item Envoi des paires $(y, z)$ aux propriétaires de $y$
+        \item Réception et traitement des résultats
+        \item Tag différent (2) pour distinguer des communications de la Phase 1
+    \end{itemize}
+    
+    \item \textbf{Vérification complète des paires}:
+    Pour chaque collision candidate $(x, z)$:
+    \[
+    \text{vérifier si } \text{Enc}_x(\text{Enc}_z(P_1)) = C_1
+    \]
+    \begin{itemize}
+        \item Test complet avec les deux clés
+        \item Filtrage des faux positifs
+        \item Arrêt après avoir trouvé \texttt{maxres} solutions
+    \end{itemize}
+\end{enumerate}
+
+
+\subsection{Phase 3: Agrégation des résultats}\label{subsec:phase3}
+
+\subsubsection{Objectif}
+Rassembler toutes les solutions trouvées sur le processus racine (rank 0).
+
+\subsubsection{Étapes détaillées}
+
+\begin{enumerate}
+    \item \textbf{Collecte des comptes} :
+    \begin{verbatim}
+    MPI_Gather(&nres_local, 1, MPI_UINT64_T,
+               all_nres, 1, MPI_UINT64_T, 0, MPI_COMM_WORLD);
+    \end{verbatim}
+    Chaque processus envoie son nombre de solutions au processus 0.
+    
+    \item \textbf{Collecte des solutions} :
+    \begin{verbatim}
+    MPI_Gatherv(local_k1, nres_local, MPI_UINT64_T,
+                global_k1, counts, displs, MPI_UINT64_T, 0);
+    MPI_Gatherv(local_k2, nres_local, MPI_UINT64_T,
+                global_k2, counts, displs, MPI_UINT64_T, 0);
+    \end{verbatim}
+    Collecte avec déplacements variables pour gérer des nombres de solutions différents.
+    
+    \item \textbf{Validation finale} (rank 0 uniquement) :
+    \begin{itemize}
+        \item Vérification que $f(k_1) = g(k_2)$ pour chaque paire
+        \item Vérification complète avec la deuxième paire $(P_1, C_1)$
+        \item Affichage des solutions valides
+    \end{itemize}
+\end{enumerate}
+
+
+
+\newpage
+\section{Algorithme principal} \label{sec:annexe}
+
+\begin{algorithm}
+\caption{Algorithme golden\_claw\_search}
+\begin{algorithmic}[1]
+\Procedure{golden\_claw\_search}{maxres, k1[], k2[]}
+    \State \textbf{Phase 1 : Construction du dictionnaire}
+    \For{$x$ tel que $x \equiv \text{rank} \pmod{\text{world\_size}}$}
+        \State $z \gets f(x)$
+        \State $shard \gets z \bmod \text{world\_size}$
+        \If{$shard = \text{rank}$}
+            \State \Call{shard\_dict\_insert}{$z, x$}
+        \Else
+            \State Ajouter $(z,x)$ à buffer pour processus $shard$
+        \EndIf
+    \EndFor
+    \State Échanger les buffers entre tous les processus
+    
+    \State \textbf{Phase 2 : Recherche de collisions}
+    \For{$z$ tel que $z \equiv \text{rank} \pmod{\text{world\_size}}$}
+        \State $y \gets g(z)$
+        \State $shard \gets y \bmod \text{world\_size}$
+        \If{$shard = \text{rank}$}
+            \State $X \gets \Call{shard\_probe\_local}{y}$
+            \For{$x \in X$}
+                \If{\Call{is\_good\_pair}{$x, z$}}
+                    \State Ajouter $(x,z)$ aux résultats locaux
+                \EndIf
+            \EndFor
+        \Else
+            \State Ajouter $(y,z)$ à buffer pour processus $shard$
+        \EndIf
+    \EndFor
+    \State Échanger et traiter les buffers
+    
+    \State \textbf{Phase 3 : Agrégation des résultats}
+    \State Collecter tous les résultats sur le processus 0
+    \State \Return solutions trouvées
+\EndProcedure
+\end{algorithmic}
+\end{algorithm}
+
+\end{document}
