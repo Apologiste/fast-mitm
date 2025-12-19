@@ -246,4 +246,49 @@ Rassembler toutes les solutions trouvées sur le processus racine (rank 0).
 \end{algorithmic}
 \end{algorithm}
 
+
+\section{Difficultés rencontrées}
+\label{sec:difficultes}
+
+La parallélisation s’est révélée plus complexe que prévu. 
+Avant d’aboutir à la version finale présentée dans ce rapport, 
+plusieurs approches ont été explorées et abandonnées en raison de performances insuffisantes.
+
+\subsection{Approche Boss-Workers}
+
+Une première implémentation reposait sur un schéma \emph{boss-workers}:\\
+\begin{itemize}
+    \item un processus maître distribuait dynamiquement des blocs de clés aux travailleurs,
+    \item les travailleurs effectuaient les calculs puis renvoyaient leurs résultats au maître.\\
+\end{itemize}
+
+Cette approche s’est révélée être contre-productive pour plusieurs raisons:\\
+\begin{itemize}
+    \item le processus maître devenait rapidement un \textbf{goulot d’étranglement}.
+    \item les communications étaient très fréquentes et de petite taille, ce qui augmentait la latence MPI
+    \item la charge de messages et de synchronisations annulaient complètement les bénéfices du parallélisme.\\
+\end{itemize}
+
+Cette version parallèle était bien \textbf{plus lente que le code séquentiel}.
+
+
+\subsection{Communications à chaque itération}
+
+Une deuxième tentative était proche de la version finale, 
+mais avec une stratégie de communication différente:\\
+\begin{itemize}
+    \item chaque paire $(z,x)$ ou $(y,z)$ était envoyée immédiatement à son processus propriétaire à l’aide de \texttt{MPI\_Send},
+    \item les communications étaient donc déclenchées à chaque itération de boucle\\
+\end{itemize}
+
+Cette version a rapidement montré ses limites:\\
+\begin{itemize}
+    \item elle générait un \textbf{nombre extrêmement élevé de messages MPI} et de petites tailles.
+    \item le coût de gestion des communications dominait le temps de calcul
+    \item la saturation du réseau dégradait les performances\\
+\end{itemize}
+
+Cette version était aussi bien \textbf{plus lente que le code séquentiel}.
+
+
 \end{document}
