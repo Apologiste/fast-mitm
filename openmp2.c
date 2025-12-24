@@ -155,7 +155,7 @@ void shard_dict_setup(u64 local_size) {
         err(1, "cannot allocate local shard");
     }
 
-    #pragma omp parallel for //FIXME
+    #pragma omp parallel for simd
     for (u64 i = 0; i < local_dict_size; i++) {
         local_A[i].k = EMPTY;
     }
@@ -480,58 +480,6 @@ int golden_claw_search(int maxres, u64 k1[], u64 k2[])
         free(local_counts);
     }
 
-
-    /*
-    for(int i=0 ; i<world_size ; i++){
-        MPI_Isend(kv_to_send[i], send_counts[i], MPI_KEYVALUE, i, 2, MPI_COMM_WORLD, &requests[i]);
-    }
-
-
-    MPI_Barrier(MPI_COMM_WORLD);
-
-    MPI_Alltoall(send_counts, 1, MPI_INT, recv_counts, 1, MPI_INT, MPI_COMM_WORLD);
-
-    
-    // -------- receptions --------
-    for(int i = 0 ; i<world_size ; i++) {
-        if(recv_counts[i]){
-            struct key_value *buffer = malloc((N/world_size)*sizeof(struct key_value));
-
-            //MPI_Recv(buffer, recv_counts[i], MPI_KEYVALUE, i, 2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-            MPI_Irecv(buffer, recv_counts[i], MPI_KEYVALUE, i, 2, MPI_COMM_WORLD, &requests[i]);
-            for(int j = 0 ; j<recv_counts[i] && nres_local<maxres ; j++){
-
-                int nx = shard_probe_local(buffer[j].key, 256, x_local);
-
-                for (int i = 0; i < nx && nres_local < maxres; i++) {
-                    if (is_good_pair(x_local[i], buffer[j].value)) {
-                        local_k1[nres_local] = x_local[i];
-                        local_k2[nres_local] = buffer[j].value;
-                        nres_local++;
-                    }
-                }
-            }
-            free(buffer);
-        }
-    }
-
-    // attendre les envois
-    for(int i=0 ; i<world_size ; i++){
-        MPI_Wait(&requests[i], MPI_STATUSES_IGNORE);
-    }
-
-    MPI_Barrier(MPI_COMM_WORLD);
-
-    
-    for(int i = 0 ; i<world_size ; i++){
-        free(kv_to_send[i]);
-    }
-
-    free(kv_to_send);
-    free(send_counts);
-    free(recv_counts);
-    free(requests);
-    */
     
     MPI_Barrier(MPI_COMM_WORLD);
 
