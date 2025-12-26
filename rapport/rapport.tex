@@ -77,6 +77,25 @@ Pour maximiser les performances, nous combinons plusieurs niveaux de parallélis
     \item \textbf{Vectorisation}: TODO
 \end{itemize}
 
+\subsection{Distribution des données}
+Le sharding est réalisé par fonction de hachage:
+\[
+\text{shard\_id} = h(\text{clé}) \bmod P
+\]
+où $P$ est le nombre de processus MPI. Cela garantit une distribution uniforme des données entre les processus.
+
+
+\subsection{Vectorisation}
+Nous avons utilisé \texttt{\#pragma omp parallel for simd} pour l'initialisation des tableaux:
+\begin{lstlisting}[language=C]
+#pragma omp parallel for simd
+for (u64 i = 0; i < local_dict_size; i++) {
+    local_A[i].k = EMPTY;
+}
+\end{lstlisting}
+Cela permet au compilateur de générer des instructions pour que le processeur puisse traiter plusieurs éléments à la fois.
+
+
 \section{Phases de l'algorithme}\label{sec:phases}
 
 \subsection{Phase 1: Construction distribuée du dictionnaire}\label{subsec:phase1}
