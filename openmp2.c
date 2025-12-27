@@ -140,26 +140,6 @@ void dict_setup(u64 size)
 		A[i].k = EMPTY;
 }
 
-/* version pour un sharded dictionnary */
-void shard_dict_setup(u64 local_size) {
-
-    // Chaque dictionnaire local est plus petit
-    local_dict_size = (local_size / world_size) * 2;
-    if (local_dict_size == 0){
-        local_dict_size = 1; //sécurité
-    }
-
-
-    local_A = malloc(local_dict_size * sizeof(struct entry));
-    if (!local_A) {
-        err(1, "cannot allocate local shard");
-    }
-
-    #pragma omp parallel for simd
-    for (u64 i = 0; i < local_dict_size; i++) {
-        local_A[i].k = EMPTY;
-    }
-}
 
 /* Insert the binding key |----> value in the dictionnary */
 void dict_insert(u64 key, u64 value)
@@ -177,22 +157,6 @@ void dict_insert(u64 key, u64 value)
     A[h].v = value;
 }
 
-/* version pour un sharded dictionnary */
-void shard_dict_insert(u64 key, u64 value) {
-    u64 h = murmur64(key) % local_dict_size;
-
-    for (;;) {
-        if (local_A[h].k == EMPTY)
-            break;
-
-        h++;
-        if (h == local_dict_size)
-            h = 0;
-    }
-
-    local_A[h].k = key % PRIME;
-    local_A[h].v = value;
-}
 
 /* Query the dictionnary with this `key`.  Write values (potentially) 
  *  matching the key in `values` and return their number. The `values`
@@ -219,7 +183,49 @@ int dict_probe(u64 key, int maxval, u64 values[])
    	}
 }
 
-/* version pour un sharded dictionnary */
+/******************************** SHARED dictionary ********************************/
+
+/* Alloue et initialise un dictionnaire local 
+    pour ce processus du dictionnaire global partagé 
+*/
+void shard_dict_setup(u64 local_size) {
+
+    // Chaque dictionnaire local est plus petit
+    local_dict_size = (local_size / world_size) * 2;
+    if (local_dict_size == 0){
+        local_dict_size = 1; //sécurité
+    }
+
+
+    local_A = malloc(local_dict_size * sizeof(struct entry));
+    if (!local_A) {
+        err(1, "cannot allocate local shard");
+    }
+
+    #pragma omp parallel for simd
+    for (u64 i = 0; i < local_dict_size; i++) {
+        local_A[i].k = EMPTY;
+    }
+}
+
+/* Insère une paire clé-valeur dans le dictionnaire local */
+void shard_dict_insert(u64 key, u64 value) {
+    u64 h = murmur64(key) % local_dict_size;
+
+    for (;;) {
+        if (local_A[h].k == EMPTY)
+            break;
+
+        h++;
+        if (h == local_dict_size)
+            h = 0;
+    }
+
+    local_A[h].k = key % PRIME;
+    local_A[h].v = value;
+}
+
+/* Recherche toutes les valeurs associées à une clé dans le dictionnaire local */
 int shard_probe_local(u64 key, int maxval, u64 values[]) {
     u32 k = key % PRIME;
     u64 h = murmur64(key) % local_dict_size;
@@ -289,47 +295,55 @@ bool is_good_pair(u64 k1, u64 k2)
 /* search the "golden collision" */
 int golden_claw_search(int maxres, u64 k1[], u64 k2[])
 {
+    u64 N = 1ull << n; //taille de l'espace de recherche 2^n
 
+    // Types MPI des données que les processus s'échanges
     MPI_Datatype MPI_KEYVALUE;
     MPI_Type_contiguous(2, MPI_UINT64_T, &MPI_KEYVALUE);
     MPI_Type_commit(&MPI_KEYVALUE);
 
-    double start = wtime();
-    u64 N = 1ull << n;
-
+    // Couples (k,v) à envoyer aux processus propriétaires
     struct key_value **kv_to_send = malloc(world_size*sizeof(struct key_value *));
-    // Allouer le tableau de tableaux
     for(int i = 0 ; i<world_size ; i++){
         kv_to_send[i] = malloc(2*(N/world_size)*sizeof(struct key_value));
     }
 
+    /************************************************************/
+    /////////////PHASE 1: remplir le dictionnaire f(x)->z////////
+    /***********************************************************/
 
-    /*******************************************************************
-    *  PHASE 1 : remplir le dictionnaire f(x) -> z
-    ******************************************************************/
-
-    int *send_counts = calloc(world_size, sizeof(int));
+    //buffers des nombres d'envoies à faire par processus
+    // send_counts[i] = nombre de couples que ce processus va envoyer au processus i
+    // recv_counts[i] = nombre de couples que ce processus va recevoir du processus i
+    int *send_counts = calloc(world_size, sizeof(int)); 
     int *recv_counts = calloc(world_size, sizeof(int));
     
-    MPI_Request *requests = malloc(world_size*sizeof(MPI_Request));
-
-    // -------- boucle d'envoi (f) --------
-    
+    // calcul et répartition des couples (z, x)
     #pragma omp parallel
     {
-        int tid = omp_get_thread_num();
-        int nthreads = omp_get_num_threads();
+        int tid = omp_get_thread_num(); //id du thread courant
+        int nthreads = omp_get_num_threads(); //nb total de threads openmp
+
+        // Buffer local par thread pour stocker temporairement les couples à envoyer
         struct key_value *kv_local = malloc(world_size * 2 * (N/world_size/nthreads + 1) * sizeof(struct key_value));
+        // Compteurs locaux par thread pour chaque processus
         int *local_counts = calloc(world_size, sizeof(int));
 
+        //Répartition statique des x entre les threads
         #pragma omp for schedule(static)
         for (u64 x = rank; x < N; x += world_size) {
+
             u64 z = f(x);
+
+            //processus propriétaire de la clé z
             int shard_id = z % world_size;
 
-            if (shard_id == rank) {
-                shard_dict_insert(z, x);
-            } else {
+            if (shard_id == rank) { //si p courant propriétaire
+                shard_dict_insert(z, x); //insertion directe
+            } 
+            else { //sinon on l'envoie plus tard au propriétaire
+
+                //stockage temporaire de (z,x)
                 int idx = local_counts[shard_id];
                 local_counts[shard_id]++;
                 kv_local[shard_id*(N/world_size/nthreads + 1) + idx].key = z;
@@ -337,6 +351,7 @@ int golden_claw_search(int maxres, u64 k1[], u64 k2[])
             }
         }
 
+        //fusion des buffers locaux des threads vers kv_to_send
         #pragma omp critical
         for (int i = 0; i < world_size; i++) {
             for (int j = 0; j < local_counts[i]; j++) {
@@ -349,13 +364,13 @@ int golden_claw_search(int maxres, u64 k1[], u64 k2[])
         free(local_counts);
     }
 
-    MPI_Barrier(MPI_COMM_WORLD);
-    // Chaque processus échange avec tous les autres combien de couples (key,value) il va leur envoyer
-    // send_counts[i] = nombre de couples que ce processus va envoyer au processus i
-    // recv_counts[i] = nombre de couples que ce processus va recevoir du processus i
+    MPI_Barrier(MPI_COMM_WORLD); //synchronisation
+
+    // Chaque processus échange avec tous les autres 
+    // combien de couples (k,v) il va leur envoyer
     MPI_Alltoall(send_counts, 1, MPI_INT, recv_counts, 1, MPI_INT, MPI_COMM_WORLD);
 
-    MPI_Barrier(MPI_COMM_WORLD);
+    MPI_Barrier(MPI_COMM_WORLD); //synchronisation
 
     // tableaux pour gérer les communications asynchrones
     // send_requests : suivre les envois en cours
@@ -374,7 +389,7 @@ int golden_claw_search(int maxres, u64 k1[], u64 k2[])
             // commence une réception asynchrone du processus i
             MPI_Irecv(recv_buffers[i], recv_counts[i], MPI_KEYVALUE, i, 1, MPI_COMM_WORLD, &recv_requests[i]);
         } else {
-            // cas ou donnée à recevoir de ce processus
+            // aucunes donnée à recevoir de ce processus
             recv_buffers[i] = NULL;
             recv_requests[i] = MPI_REQUEST_NULL; 
         }
@@ -387,7 +402,7 @@ int golden_claw_search(int maxres, u64 k1[], u64 k2[])
             // kv_to_send[i] : couples destinés au processus i
             MPI_Isend(kv_to_send[i], send_counts[i], MPI_KEYVALUE, i, 1, MPI_COMM_WORLD, &send_requests[i]);
         } else {
-            // cas ou donnée à envoyer à ce processus
+            // aucunes donnée à envoyer à ce processus
             send_requests[i] = MPI_REQUEST_NULL; 
         }
     }
@@ -421,37 +436,56 @@ int golden_claw_search(int maxres, u64 k1[], u64 k2[])
 
     MPI_Barrier(MPI_COMM_WORLD);
 
-    /*******************************************************************
-     *  PHASE 2 : probing g(z) -> y et test des collisions
-    ******************************************************************/
+    /************************************************************/
+    /////////////PHASE 2 : probing g(z)->y etcollisions//////////
+    /***********************************************************/
 
+    // Réinitialisation des compteurs d’envoi/réception pour la phase 2
     send_counts = calloc(world_size, sizeof(int));
     recv_counts = calloc(world_size, sizeof(int));
 
-    //requests = malloc(world_size*sizeof(MPI_Request));
-
+    // Tableaux locaux pour stocker les résultats trouvés par ce processus
     u64 local_k1[16], local_k2[16];
+
+    // Nombre de collisions valides trouvées localement
     u64 nres_local = 0;
+
+    // Buffer temporaire pour récupérer les x associés à une clé y
     u64 x_local[256];
 
-    // -------- boucle d’envoi (g)--------
+    // calcul de g(z) et recherche de collisions
     #pragma omp parallel
     {
-        int tid = omp_get_thread_num(); //numero thread
+        int tid = omp_get_thread_num(); //id thread lcoal
         int nthreads = omp_get_num_threads(); //nb total de thread
+
+        // Buffer local par thread pour stocker 
+        // les couples (y, z) destinés aux autres processus
         struct key_value *kv_local = malloc(world_size * 2 * (N/world_size/nthreads + 1) * sizeof(struct key_value)); //buffer local par thread des k-v qu'il doit envoyer aux autres
+        
+        // Compteurs locaux par thread : 
+        // nombre de couples à envoyer à chaque processus
         int *local_counts = calloc(world_size, sizeof(int)); //buffer du thread
 
+        // Répartition statique des valeurs z entre les threads
         #pragma omp for schedule(static)
         for (u64 z = rank; z < N; z += world_size) {
-            u64 y = g(z);
-            int shard_id = y % world_size;
 
-            if (shard_id == rank) {
+            u64 y = g(z);
+
+            int shard_id = y % world_size; //id du processus propriétaire de la clé y
+
+            if (shard_id == rank) { // si p courant possède la bonne partie du dictionnaire
+                
+                //recherche locales des x associés à y
                 int nx = shard_probe_local(y, 256, x_local);
+
+                // tester les collisions (x,z)
                 for (int i = 0; i < nx; i++) {
                     if (nres_local >= maxres) break;
                     if (is_good_pair(x_local[i], z)) {
+
+                        //écriture des résultats validés
                         #pragma omp critical
                         {
                             local_k1[nres_local] = x_local[i];
@@ -460,7 +494,10 @@ int golden_claw_search(int maxres, u64 k1[], u64 k2[])
                         }
                     }
                 }
-            } else {
+            } 
+            else { //sinon, envoie plus tard au propriétaire
+
+                //stockage temporaire du couple (y,z)
                 int idx = local_counts[shard_id];
                 local_counts[shard_id]++;
                 kv_local[shard_id*(N/world_size/nthreads + 1) + idx].key = y;
@@ -468,7 +505,7 @@ int golden_claw_search(int maxres, u64 k1[], u64 k2[])
             }
         }
 
-        // fusionner les buffers locaux de chaque thread dans le buffer global
+        // fusionner les buffers locaux de chaque thread dans le buffer global kv_to_send
         #pragma omp critical
         for (int i=0; i<world_size; i++){
             for (int j=0; j<local_counts[i]; j++){
@@ -481,15 +518,18 @@ int golden_claw_search(int maxres, u64 k1[], u64 k2[])
     }
 
     
-    MPI_Barrier(MPI_COMM_WORLD);
+    MPI_Barrier(MPI_COMM_WORLD); //synchronisation 
 
+    //chaque processus envoie aux autres combien de couples il va leur envoyer
     MPI_Alltoall(send_counts, 1, MPI_INT, recv_counts, 1, MPI_INT, MPI_COMM_WORLD);
 
-    MPI_Barrier(MPI_COMM_WORLD);
+    MPI_Barrier(MPI_COMM_WORLD); //synchronisation 
 
+    // requêtes MPI pour envois et réceptions asynchrones
     send_requests = malloc(world_size * sizeof(MPI_Request));
     recv_requests = malloc(world_size * sizeof(MPI_Request));
 
+    // buffers pour recevoir les couples venant des autres processus
     recv_buffers = malloc(world_size * sizeof(struct key_value *));
 
     // chaque processus s'annonce prêt à recevoir
@@ -499,7 +539,7 @@ int golden_claw_search(int maxres, u64 k1[], u64 k2[])
             // commence une réception asynchrone du processus i
             MPI_Irecv(recv_buffers[i], recv_counts[i], MPI_KEYVALUE, i, 2, MPI_COMM_WORLD, &recv_requests[i]);
         } else {
-            // cas ou donnée à recevoir de ce processus
+            // aucunes donnée à recevoir de ce processus
             recv_buffers[i] = NULL;
             recv_requests[i] = MPI_REQUEST_NULL; 
         }
@@ -512,11 +552,10 @@ int golden_claw_search(int maxres, u64 k1[], u64 k2[])
             // kv_to_send[i] : couples destinés au processus i
             MPI_Isend(kv_to_send[i], send_counts[i], MPI_KEYVALUE, i, 2, MPI_COMM_WORLD, &send_requests[i]);
         } else {
-            // cas ou donnée à envoyer à ce processus
+            // aucunes donnée à envoyer à ce processus
             send_requests[i] = MPI_REQUEST_NULL; 
         }
     }
-
 
     // On attend que toutes les réceptions soient terminées avant de traiter les données
     for(int i = 0; i < world_size; i++) {
@@ -524,12 +563,14 @@ int golden_claw_search(int maxres, u64 k1[], u64 k2[])
             //bloque jusqu'à ce que la réception du processus i soit terminée
             MPI_Wait(&recv_requests[i], MPI_STATUS_IGNORE);
             
-            // 
+            // Traitement des couples reçus
             for(int j = 0; j < recv_counts[i]; j++) {
                 //shard_dict_insert(recv_buffers[i][j].key, recv_buffers[i][j].value);
 
+                // x locaux associés à la clé reçue
                 int nx = shard_probe_local(recv_buffers[i][j].key, 256, x_local);
 
+                // Vérification des collisions valides et stockage des résultats
                 for (int k = 0; k < nx && nres_local < maxres; k++) {
                     if (is_good_pair(x_local[k], recv_buffers[i][j].value)) {
                         local_k1[nres_local] = x_local[k];
@@ -543,7 +584,7 @@ int golden_claw_search(int maxres, u64 k1[], u64 k2[])
         }
     }
 
-    // on attend que tous les envois soient terminés
+    // on attend la fin de tous les envois asynchrones
     for(int i = 0; i < world_size; i++) {
         if(send_requests[i] != MPI_REQUEST_NULL) {
             MPI_Wait(&send_requests[i], MPI_STATUS_IGNORE);
@@ -559,21 +600,26 @@ int golden_claw_search(int maxres, u64 k1[], u64 k2[])
 
     MPI_Barrier(MPI_COMM_WORLD);
 
-    /*******************************************************************
-     *  PHASE 3 : GATHER DES RÉSULTATS
-    ******************************************************************/
+    /************************************************************/
+    /////////////PHASE 3 : GATHER DES RÉSULTATS//////////////////
+    /***********************************************************/
 
+    // Chaque processus envoie le nombre de résultats locaux au processus 0
     u64 all_nres[world_size];
     MPI_Gather(&nres_local, 1, MPI_UINT64_T,all_nres, 1, MPI_UINT64_T,0, MPI_COMM_WORLD);
 
     if (rank == 0) {
 
+        // Calcul du nombre total de résultats trouvés sur tous les processus
         u64 total = 0;
-        for (int i = 0; i < world_size; i++)
+        for (int i = 0; i < world_size; i++){
             total += all_nres[i];
+        }
 
         u64 final = (total < maxres ? total : maxres);
 
+        // counts = nombre d'éléments par processus
+        // offset = position de départ dans le tableau final pour chaque processus
         int *counts = malloc(world_size * sizeof(int));
         int *offset = malloc(world_size * sizeof(int));
 
@@ -584,13 +630,16 @@ int golden_claw_search(int maxres, u64 k1[], u64 k2[])
                 offset[i] = offset[i - 1] + counts[i - 1];
         }
 
+        // Tableaux globaux pour rassembler tous les résultats
         u64 *global_k1 = malloc(total * sizeof(u64));
         u64 *global_k2 = malloc(total * sizeof(u64));
 
+        // Rassemblement des résultats k1 depuis tous les processus
         MPI_Gatherv(local_k1, nres_local, MPI_UINT64_T,global_k1, counts, offset, MPI_UINT64_T, 0, MPI_COMM_WORLD);
-
+        // Rassemblement des résultats k2 depuis tous les processus
         MPI_Gatherv(local_k2, nres_local, MPI_UINT64_T,global_k2, counts, offset, MPI_UINT64_T,0, MPI_COMM_WORLD);
 
+        // Copie dans les tableaux de sortie k1 et k2
         for (u64 i = 0; i < final; i++) {
             k1[i] = global_k1[i];
             k2[i] = global_k2[i];
@@ -604,9 +653,8 @@ int golden_claw_search(int maxres, u64 k1[], u64 k2[])
         return final;
     }
 
-    // autres ranks
+    // Les autres procesus participent au Gatherv mais ne stockent pas les résultats globaux
     MPI_Gatherv(local_k1, nres_local, MPI_UINT64_T,NULL, NULL, NULL, MPI_UINT64_T,0, MPI_COMM_WORLD);
-
     MPI_Gatherv(local_k2, nres_local, MPI_UINT64_T,NULL, NULL, NULL, MPI_UINT64_T, 0, MPI_COMM_WORLD);
 
     return 0;
@@ -670,70 +718,80 @@ void process_command_line_options(int argc, char ** argv)
 int main(int argc, char **argv)
 {
     int provided;
+
+    // Initialisation MPI
     MPI_Init_thread(&argc, &argv, MPI_THREAD_FUNNELED, &provided);
     if (provided < MPI_THREAD_FUNNELED) {
         fprintf(stderr, "Le support multi-thread MPI n'est pas suffisant\n");
         MPI_Abort(MPI_COMM_WORLD, 1);
     }
 
+    // rang et nombre de processus MPI
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &world_size);
 
-
+    // Traitement des options
     process_command_line_options(argc, argv);
 
+    // INformations sur le programme
     if (rank == 0) {
         printf("Nombre de processus MPI : %d\n", world_size);
+
+        // Affichage du nombre de threads OpenMP
         #pragma omp parallel
-    {
-        #pragma omp single
         {
-            int nthreads = omp_get_num_threads();
-            printf("Nombre de threads OpenMP : %d\n", nthreads);
+            #pragma omp single
+            {
+                int nthreads = omp_get_num_threads();
+                printf("Nombre de threads OpenMP : %d\n", nthreads);
+            }
         }
-    }
-        printf("Running with n=%d, C0=(%08x, %08x) and C1=(%08x, %08x)\n", 
-            (int) n, C[0][0], C[0][1], C[1][0], C[1][1]);
+
+        printf("Running with n=%d, C0=(%08x, %08x) and C1=(%08x, %08x)\n",
+               (int)n, C[0][0], C[0][1], C[1][0], C[1][1]);
     }
 
     // Initialisation du dictionnaire shardé
     shard_dict_setup(1.125 * (1ull << n));
 
+    // Tableaux pour stocker les solutions locales
     u64 k1[16], k2[16];
 
-    ///////////////EXECUTION/////////////////////
+    /********************************************************/
+    /////////////////////// EXECUTION ////////////////////////
+    /********************************************************/
+
     double start, end;
 
-    // Synchronisation avant le calcul
     MPI_Barrier(MPI_COMM_WORLD);
-    start = MPI_Wtime();
 
+    start = MPI_Wtime();
     int nkey = golden_claw_search(16, k1, k2);
 
-    // Synchronisation après le calcul
     MPI_Barrier(MPI_COMM_WORLD);
     end = MPI_Wtime();
-    /////////////////////////////////////////////
 
+    /********************************************************/
+    //////////////////////////////////////////////////////////
+    /********************************************************/
     MPI_Finalize();
 
-    // Rank 0 valide et affiche
+    // Vérification des résultats et affichage
     if (rank == 0) {
         if (nkey == 0) {
             printf("Aucune solution trouvée pour n=%lu\n", n);
             return 0;
         }
 
-
         for (int i = 0; i < nkey; i++) {
             assert(f(k1[i]) == g(k2[i]));
-            assert(is_good_pair(k1[i], k2[i]));        
+            assert(is_good_pair(k1[i], k2[i]));
+
             printf("Solution trouvée: (%" PRIx64 ", %" PRIx64 ") [checked OK]\n",
                    k1[i], k2[i]);
         }
 
-        printf("Temps d'exécution MPI : %.6f sec\n",
-               end - start);
+        printf("Temps d'exécution MPI : %.6f sec\n", end - start);
     }
 
     return 0;
