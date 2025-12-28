@@ -288,6 +288,14 @@ Cette approche s’est révélée être contre-productive pour plusieurs raisons
     \item la charge de messages et de synchronisations annulaient complètement les bénéfices du parallélisme.\\
 \end{itemize}
 
+Le Boss avait besoin de beaucoup de mémoire RAM, et il y a avait de nombreux workers.
+Cela créait un scénario de `botttleneck'.
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.4\textwidth]{images/bottleneck.png}
+\end{figure}
+
 Cette version parallèle était bien \textbf{plus lente que le code séquentiel}.
 
 
