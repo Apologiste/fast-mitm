@@ -74,7 +74,7 @@ Pour maximiser les performances, nous combinons plusieurs niveaux de parallélis
     \item \textbf{MPI}: parallélisme multi-processus
     \item \textbf{OpenMP}: parallélisme multi-thread
     \item \textbf{Sharding}: distribution du dictionnaire entre processus
-    \item \textbf{Vectorisation}: TODO
+    \item \textbf{Vectorisation}: accélération de l’initialisation des dictionnaires locaux
 \end{itemize}
 
 
@@ -203,6 +203,14 @@ soit en parallèle sur des clés distinctes lors de la construction locale.
 De même, chaque thread valide les collisions localement, 
 et les résultats sont stockés dans des tableaux partagés protégés 
 par des sections critiques pour éviter toute condition de concurrence.
+
+
+\subsection{Vectorisation}
+
+La vectorisation est utilisée lors de l’initialisation des dictionnaires locaux (\texttt{shard\_dict\_setup}). 
+Grâce à la directive \texttt{\#pragma omp simd}, plusieurs entrées du dictionnaire sont initialisées en parallèle, 
+ce qui accélère la phase de préparation.
+
 
 \section{Algorithme principal (version simplifiée)}
 
