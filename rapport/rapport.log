@@ -1,4 +1,4 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.25 (TeX Live 2023/Debian) (preloaded format=pdflatex 2025.10.22)  29 DEC 2025 22:56
+This is pdfTeX, Version 3.141592653-2.6-1.40.25 (TeX Live 2023/Debian) (preloaded format=pdflatex 2025.10.22)  30 DEC 2025 18:34
 entering extended mode
  restricted \write18 enabled.
  file:line:error style messages enabled.
@@ -484,9 +484,9 @@ Package hyperref Info: bookmark level for unknown algorithm defaults to 0 on inp
 <images/bottleneck.png, id=123, 345.29pt x 164.615pt>
 File: images/bottleneck.png Graphic file (type png)
 <use images/bottleneck.png>
-Package pdftex.def Info: images/bottleneck.png  used on input line 288.
+Package pdftex.def Info: images/bottleneck.png  used on input line 305.
 (pdftex.def)             Requested size: 182.09486pt x 86.81349pt.
- [5 <./images/bottleneck.png>] 
+ [5 <./images/bottleneck.png>] [6] 
 enddocument/afterlastpage: lastpage setting LastPage.
 (./rapport.aux)
  ***********
@@ -497,18 +497,18 @@ Package rerunfilecheck Info: File `rapport.out' has not changed.
 (rerunfilecheck)             Checksum: E16F1C5E03AC675A619237C5C4D4DAFC;2735.
  ) 
 Here is how much of TeX's memory you used:
- 14937 strings out of 474222
- 228632 string characters out of 5748732
+ 14940 strings out of 474222
+ 228698 string characters out of 5748732
  1941975 words of memory out of 5000000
- 36957 multiletter control sequences out of 15000+600000
+ 36959 multiletter control sequences out of 15000+600000
  578129 words of font info for 81 fonts, out of 8000000 for 9000
  1141 hyphenation exceptions out of 8191
- 75i,12n,79p,419b,538s stack positions out of 10000i,1000n,20000p,200000b,200000s
+ 75i,12n,79p,419b,552s stack positions out of 10000i,1000n,20000p,200000b,200000s
 </usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi10.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi5.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi7.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/cm/cmr10.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/cm/cmr5.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/cm/cmr7.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy10.pfb></usr/share/texmf/fonts/type1/public/cm-super/sfbx0900.pfb></usr/share/texmf/fonts/type1/public/cm-super/sfbx1000.pfb></usr/share/texmf/fonts/type1/public/cm-super/sfbx1200.pfb></usr/share/texmf/fonts/type1/public/cm-super/sfbx1440.pfb></usr/share/texmf/fonts/type1/public/cm-super/sfbx1728.pfb></usr/share/texmf/fonts/type1/public/cm-super/sfcc1000.pfb></usr/share/texmf/fonts/type1/public/cm-super/sfrm0800.pfb></usr/share/texmf/fonts/type1/public/cm-super/sfrm0900.pfb></usr/share/texmf/fonts/type1/public/cm-super/sfrm1000.pfb></usr/share/texmf/fonts/type1/public/cm-super/sfrm1200.pfb></usr/share/texmf/fonts/type1/public/cm-super/sfti0900.pfb></usr/share/texmf/fonts/type1/public/cm-super/sfti1000.pfb></usr/share/texmf/fonts/type1/public/cm-super/sftt1000.pfb>
-Output written on rapport.pdf (5 pages, 361746 bytes).
+Output written on rapport.pdf (6 pages, 366906 bytes).
 PDF statistics:
- 219 PDF objects out of 1000 (max. 8388607)
- 169 compressed objects within 2 object streams
- 23 named destinations out of 1000 (max. 500000)
+ 224 PDF objects out of 1000 (max. 8388607)
+ 173 compressed objects within 2 object streams
+ 24 named destinations out of 1000 (max. 500000)
  126 words of extra memory for PDF output out of 10000 (max. 10000000)
 

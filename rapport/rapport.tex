@@ -258,6 +258,23 @@ ce qui accélère la phase de préparation.
 
 \section{Résultats}
 
+\begin{verbatim}
+oarsub -l nodes=1/core=64,walltime=01:00:00 \
+  "mpiexec --mca pml ob1 --mca btl tcp,self -n 64 \
+  a.out --n 36 --C0 2ddbc9fe4da17416 --C1 fab28111310cbea3"
+\end{verbatim}
+
+\begin{itemize}
+    \item Nombre de processus MPI : \texttt{64}
+    \item Nombre de threads OpenMP : \texttt{36}
+    \item \texttt{n = 36}
+    \item \texttt{C0 = (4da17416, 2ddbc9fe)}
+    \item \texttt{C1 = (310cbea3, fab28111)}
+    \item Solution trouvée: \texttt{(8c41a4b9b, fcd233151)}
+    \item Temps d'éxecution: \texttt{979 secondes (16 minutes)}
+\end{itemize}
+
+
 
 \section{Difficultés rencontrées}
 
