@@ -204,13 +204,11 @@ De même, chaque thread valide les collisions localement,
 et les résultats sont stockés dans des tableaux partagés protégés 
 par des sections critiques pour éviter toute condition de concurrence.
 
-
 \subsection{Vectorisation}
 
 La vectorisation est utilisée lors de l’initialisation des dictionnaires locaux (\texttt{shard\_dict\_setup}). 
 Grâce à la directive \texttt{\#pragma omp simd}, plusieurs entrées du dictionnaire sont initialisées en parallèle, 
 ce qui accélère la phase de préparation.
-
 
 \section{Algorithme principal (version simplifiée)}
 
@@ -254,7 +252,11 @@ ce qui accélère la phase de préparation.
 \end{algorithmic}
 \end{algorithm}
 
-\newpage
+\section{Schéma détaillé}
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.75\textwidth]{images/schema.png}
+\end{figure}
 
 \section{Résultats}
 
@@ -265,8 +267,8 @@ oarsub -l nodes=1/core=64,walltime=01:00:00 \
 \end{verbatim}
 
 \begin{itemize}
-    \item Nombre de processus MPI : \texttt{64}
-    \item Nombre de threads OpenMP : \texttt{36}
+    \item Nombre de processus MPI: \texttt{64}
+    \item Nombre de threads OpenMP: \texttt{36}
     \item \texttt{n = 36}
     \item \texttt{C0 = (4da17416, 2ddbc9fe)}
     \item \texttt{C1 = (310cbea3, fab28111)}
