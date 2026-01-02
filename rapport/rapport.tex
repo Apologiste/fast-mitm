@@ -252,18 +252,16 @@ ce qui accélère la phase de préparation.
 \section{Résultats}
 
 L’ensemble des résultats a été obtenu en utilisant le script \texttt{script.sh}, 
-fourni en annexe et joint en fichier. 
-Ce script permet d’automatiser l’exécution de tous les tests en mode interactif 
+fourni en annexe et joint en fichier, après réservation de coeurs en mode interactif. 
+Ce script permet d’automatiser l’exécution de tous les tests 
 en lançant successivement les calculs pour différentes valeurs du paramètre $n$.\\
 
 Les instances de test utilisées viennent de
-\texttt{https://ppar.tme-crypto.fr/<username>/<n>} avec :
+\texttt{https://ppar.tme-crypto.fr/<username>/<n>} avec:
 
 \begin{itemize}
     \item <user> = $'test'$
-    \item $<n>$ = $20$ \ldots $36$
-    
-
+    \item $<n>$ = $20$ \ldots $36$ \\
 \end{itemize}
 
 \begin{table}[h!]
@@ -295,6 +293,14 @@ $n$ & $C_0$ & $C_1$ & Solution trouvée & Temps (s) \\
 \label{tab:resultats_mpi}
 \end{table}
 
+La valeur maximale testée est \textbf{n = 36} avec un temps d’exécution 
+d'environ $979$ secondes, soit près de \textbf{16 minutes}.
+L'exécution séquentielle pour cette valeur de $n$
+nécessite environ 864~Go de mémoire RAM \@ \\
+
+Les tests n’ont pas été au-delà de cette valeur en raison de la consommation mémoire qui est 
+exponentielle. La taille du dictionnaire devient bien trop grande pour notre approche et pour les noeuds réservés.
+
 \begin{figure}[H]
     \centering
     \includegraphics[width=0.6\textwidth]{images/courbe.png}
@@ -305,10 +311,6 @@ $n$ & $C_0$ & $C_1$ & Solution trouvée & Temps (s) \\
     \includegraphics[width=0.6\textwidth]{images/courbe2.png}
 \end{figure}
 
-\paragraph{Limites:}
-
-Les tests n’ont pas été au-delà de $n = 36$ en raison de la consommation mémoire qui est 
-exponentielle. La taille du dictionnaire devient bien trop grande pour notre approche et pour les noeuds réservés.
 
 \section{Difficultés rencontrées}
 
