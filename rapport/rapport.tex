@@ -11,6 +11,9 @@
 \usepackage{graphicx}
 \usepackage{hyperref}
 \usepackage{geometry}
+\usepackage{listings}
+\usepackage{xcolor}
+
 
 \usepackage[utf8]{inputenc}
 \usepackage[T1]{fontenc}
@@ -23,6 +26,32 @@
 \usepackage{fancyhdr}
 \usepackage{graphicx} 
 \usepackage{float}
+
+\lstdefinelanguage{bash}{
+  keywords={for,do,done,in,if,then,else,fi,while,echo},
+  sensitive=true,
+  comment=[l]{\#},
+  morestring=[b]"
+}
+
+\lstset{
+  language=bash,
+  basicstyle=\ttfamily\small,
+  keywordstyle=\color{blue},
+  commentstyle=\color{gray},
+  stringstyle=\color{teal},
+  numbers=left,
+  numberstyle=\tiny\color{gray},
+  stepnumber=1,
+  numbersep=8pt,
+  frame=single,
+  breaklines=true,
+  breakatwhitespace=true,
+  showstringspaces=false,
+  tabsize=2,
+  captionpos=b
+}
+
 
 \setlength{\headheight}{14pt} 
 \hbadness=11000  
@@ -54,6 +83,8 @@
 \thispagestyle{fancy} 
 \tableofcontents
 
+\newpage
+
 \section{Introduction}\label{sec:introduction}
 
 L'attaque \emph{Meet-in-the-Middle} est une technique qui exploite la possibilité 
@@ -74,7 +105,7 @@ Pour maximiser les performances, nous combinons plusieurs niveaux de parallélis
     \item \textbf{MPI}: parallélisme multi-processus
     \item \textbf{OpenMP}: parallélisme multi-thread
     \item \textbf{Sharding}: distribution du dictionnaire entre processus
-    \item \textbf{Vectorisation}: accélération de l’initialisation des dictionnaires locaux
+    \item \textbf{Vectorisation}: parallélisme au niveau des données
 \end{itemize}
 
 
@@ -102,9 +133,9 @@ Chaque processus maintient uniquement son dictionnaire local, ce qui permet:
 Nous avons ajouté trois fonctions pour gérer le dictionnaire shardé: 
 
 \begin{itemize}
-    \item \texttt{shard\_dict\_setup} pour l’initialisation, 
-    \item \texttt{shard\_dict\_insert} pour l’insertion, 
-    \item \texttt{shard\_probe\_local} pour la recherche locale.
+    \item \texttt{shard\_dict\_setup} pour l’initialisation,
+    \item \texttt{shard\_dict\_insert} pour l’insertion
+    \item \texttt{shard\_probe\_local} pour la recherche locale
 
 \end{itemize}
 
@@ -210,48 +241,6 @@ La vectorisation est utilisée lors de l’initialisation des dictionnaires loca
 Grâce à la directive \texttt{\#pragma omp simd}, plusieurs entrées du dictionnaire sont initialisées en parallèle, 
 ce qui accélère la phase de préparation.
 
-\section{Algorithme principal (version simplifiée)}
-
-\begin{algorithm}[H]
-\caption{Algorithme golden\_claw\_search}
-\begin{algorithmic}[1]
-\Procedure{golden\_claw\_search}{maxres, k1[], k2[]}
-    \State \textbf{Phase 1 : Construction du dictionnaire}
-    \For{$x$ tel que $x \equiv \text{rank} \pmod{\text{world\_size}}$}
-        \State $z \gets f(x)$
-        \State $shard \gets z \bmod \text{world\_size}$
-        \If{$shard = \text{rank}$}
-            \State \Call{shard\_dict\_insert}{$z, x$}
-        \Else
-            \State Ajouter $(z,x)$ dans un buffer pour les envoyer plus tard $shard$
-        \EndIf
-    \EndFor
-    \State Échanger les buffers entre tous les processus
-    
-    \State \textbf{Phase 2 : Recherche de collisions}
-    \For{$z$ tel que $z \equiv \text{rank} \pmod{\text{world\_size}}$}
-        \State $y \gets g(z)$
-        \State $shard \gets y \bmod \text{world\_size}$
-        \If{$shard = \text{rank}$}
-            \State $X \gets \Call{shard\_probe\_local}{y}$
-            \For{$x \in X$}
-                \If{\Call{is\_good\_pair}{$x, z$}}
-                    \State Ajouter $(x,z)$ aux résultats locaux
-                \EndIf
-            \EndFor
-        \Else
-            \State Ajouter $(y,z)$ dans un buffer pour les envoyer plus tard $shard$
-        \EndIf
-    \EndFor
-    \State Échanger et traiter les buffers
-    
-    \State \textbf{Phase 3 : Agrégation des résultats}
-    \State Collecter tous les résultats sur le processus 0
-    \State \Return solutions trouvées
-\EndProcedure
-\end{algorithmic}
-\end{algorithm}
-
 \section{Schéma détaillé}
 \begin{figure}[H]
     \centering
@@ -260,23 +249,59 @@ ce qui accélère la phase de préparation.
 
 \section{Résultats}
 
-\begin{verbatim}
-oarsub -l nodes=1/core=64,walltime=01:00:00 \
-  "mpiexec --mca pml ob1 --mca btl tcp,self -n 64 \
-  a.out --n 36 --C0 2ddbc9fe4da17416 --C1 fab28111310cbea3"
-\end{verbatim}
+L’ensemble des résultats a été obtenu en utilisant le script \texttt{script.sh}, 
+fourni en annexe et joint en fichier. 
+Ce script permet d’automatiser l’exécution de tous les tests en mode interactif 
+en lançant successivement les calculs pour différentes valeurs du paramètre $n$.\\
+
+Les instances de test utilisées viennent de
+\texttt{https://ppar.tme-crypto.fr/<username>/<n>} avec :
 
 \begin{itemize}
-    \item Nombre de processus MPI: \texttt{64}
-    \item Nombre de threads OpenMP: \texttt{36}
-    \item \texttt{n = 36}
-    \item \texttt{C0 = (4da17416, 2ddbc9fe)}
-    \item \texttt{C1 = (310cbea3, fab28111)}
-    \item Solution trouvée: \texttt{(8c41a4b9b, fcd233151)}
-    \item Temps d'éxecution: \texttt{979 secondes (16 minutes)}
+    \item <user> = $'test'$
+    \item $<n>$ = $20$ \ldots $36$
+    
+
 \end{itemize}
 
+\begin{table}[h!]
+\centering
+\begin{tabular}{|c|c|c|c|c|}
+\hline
+$n$ & $C_0$ & $C_1$ & Solution trouvée & Temps (s) \\
+\hline
+20 & 6a5f3d287fb1b0a6 & c1a0679bd25f06c5 & (be693, cfc2e) & 0.904 \\
+21 & 0ac3cb45892c96d6 & cb28af67fc74dcbc & (1a826b, f179c) & 1.106 \\
+22 & cd842501442e84f0 & 63778751f0e4bedb & (2cdae9, 1b6b5e) & 0.872 \\
+23 & 1a3bd0f512dba4fd & 1706a8b7d71f3017 & (56f292, 13e52a) & 1.383 \\
+24 & e3b8fb27d90bd863 & 0c094fccd755cde2 & (2683b1, 53d2b6) & 1.402 \\
+25 & dea7744bf2755ad9 & 6e0ebdc050a492ee & (1038e1d, 1588d4d) & 1.825 \\
+26 & 18667086664cac57 & 7ceb2e54e389be66 & (f73f86, 2668ca4) & 2.755 \\
+27 & ce2c621789812038 & 13950eec4d6caf2b & (66e3e4f, 5076457) & 5.041 \\
+28 & 0094a07e0d20f0d4 & 3e29df756df6b567 & (1acb623, ec683c1) & 8.818 \\
+29 & 19b05757e5e766a4 & 09a83a6bee5132a1 & (1ea8fa9b, b3d61ec) & 12.314 \\
+30 & 6b588b953555fdc3 & 857f62bb3ab86c48 & (2cfce03, 7e53f17) & 18.551 \\
+31 & 9cbcfd09ac384207 & b486d19a8ebf1afa & (37f31175, 3e610dcc) & 29.797 \\
+32 & 3458103b639f9f47 & 9e1499d15be61572 & (e498a06f, 945a7522) & 52.306 \\
+33 & 4d1b29953931a24f & e0bc6cefe332ac33 & (770ef739, 1fa29f82e) & 135.823 \\
+34 & 9fb679b7ce303683 & adf075f18af8e8fb & (2166cee16, 34368c0ca) & 233.493 \\
+35 & ce7edd87642dc9dd & 9a192c412800b2c5 & (3b257675e, 33348638) & 443.046 \\
+36 & 2ddbc9fe4da17416 & fab28111310cbea3 & (8c41a4b9b, fcd233151) & 979.802 \\
+\hline
+\end{tabular}
+\caption{Récapitulatif des solutions trouvées}
+\label{tab:resultats_mpi}
+\end{table}
 
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.6\textwidth]{images/courbe.png}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.6\textwidth]{images/courbe2.png}
+\end{figure}
 
 \section{Difficultés rencontrées}
 
@@ -327,6 +352,47 @@ Cette version a rapidement montré ses limites:\\
 \end{itemize}
 
 Cette version était aussi bien \textbf{plus lente que le code séquentiel}.
+
+
+\section{Script d’exécution des tests}
+
+\begin{lstlisting}
+#!/bin/bash
+
+params=(
+  "20 6a5f3d287fb1b0a6 c1a0679bd25f06c5"
+  "21 0ac3cb45892c96d6 cb28af67fc74dcbc"
+  "22 cd842501442e84f0 63778751f0e4bedb"
+  "23 1a3bd0f512dba4fd 1706a8b7d71f3017"
+  "24 e3b8fb27d90bd863 0c094fccd755cde2"
+  "25 dea7744bf2755ad9 6e0ebdc050a492ee"
+  "26 18667086664cac57 7ceb2e54e389be66"
+  "27 ce2c621789812038 13950eec4d6caf2b"
+  "28 0094a07e0d20f0d4 3e29df756df6b567"
+  "29 19b05757e5e766a4 09a83a6bee5132a1"
+  "30 6b588b953555fdc3 857f62bb3ab86c48"
+  "31 9cbcfd09ac384207 b486d19a8ebf1afa"
+  "32 3458103b639f9f47 9e1499d15be61572"
+  "33 4d1b29953931a24f e0bc6cefe332ac33"
+  "34 9fb679b7ce303683 adf075f18af8e8fb"
+  "35 ce7edd87642dc9dd 9a192c412800b2c5"
+  "36 2ddbc9fe4da17416 fab28111310cbea3"
+)
+
+for p in "${params[@]}"; do
+  n=$(echo "$p" | awk '{print $1}')
+  C0=$(echo "$p" | awk '{print $2}')
+  C1=$(echo "$p" | awk '{print $3}')
+
+  echo "Soumission pour --n $n --C0 $C0 --C1 $C1"
+
+  mpiexec --mca pml ob1 --mca btl tcp,self \
+          --hostfile $OAR_NODEFILE \
+          -n $(wc -l < $OAR_NODEFILE) \
+          final --n "$n" --C0 "$C0" --C1 "$C1"
+done
+\end{lstlisting}
+
 
 
 \end{document}
