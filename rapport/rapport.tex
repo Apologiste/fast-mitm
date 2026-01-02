@@ -71,8 +71,10 @@
 \date{\today}
 
 \begin{document}
+\pagenumbering{gobble}
 
 \maketitle
+\thispagestyle{empty}
 
 \begin{abstract}
     \begin{center}
@@ -80,10 +82,11 @@
     \end{center}
 \end{abstract}
 
-\thispagestyle{fancy} 
+
 \tableofcontents
 
 \newpage
+\pagenumbering{arabic}
 
 \section{Introduction}\label{sec:introduction}
 
