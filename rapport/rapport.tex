@@ -14,7 +14,6 @@
 \usepackage{listings}
 \usepackage{xcolor}
 
-
 \usepackage[utf8]{inputenc}
 \usepackage[T1]{fontenc}
 \usepackage[french]{babel}
@@ -305,6 +304,11 @@ $n$ & $C_0$ & $C_1$ & Solution trouvée & Temps (s) \\
     \centering
     \includegraphics[width=0.6\textwidth]{images/courbe2.png}
 \end{figure}
+
+\paragraph{Limites:}
+
+Les tests n’ont pas été au-delà de $n = 36$ en raison de la consommation mémoire qui est 
+exponentielle. La taille du dictionnaire devient bien trop grande pour notre approche et pour les noeuds réservés.
 
 \section{Difficultés rencontrées}
 
