@@ -33,7 +33,7 @@ Remplacer $1 et $2 par des instances, en voici quelques exemples d'instances ave
 "36 2ddbc9fe4da17416 fab28111310cbea3"
 
 
-2- Exécuter un test automatique :
+3- Exécuter un test automatique :
 
 -Utiliser la commande "./script.sh" en mode interactif pour exécuter le script qui permet de faire tous les tests pour n allant de 20 à 36
 -Il est possible de devoir faire "chmod +x script.sh" avant.

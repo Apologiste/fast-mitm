@@ -725,7 +725,7 @@ int main(int argc, char **argv)
         fprintf(stderr, "Le support multi-thread MPI n'est pas suffisant\n");
         MPI_Abort(MPI_COMM_WORLD, 1);
     }
-    omp_set_num_threads(4);
+    //omp_set_num_threads(4);
 
     // rang et nombre de processus MPI
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
